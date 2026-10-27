@@ -1,0 +1,332 @@
+<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#fff;color:#000}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>
+<meta name="claude:viewport-fit-sides" content="cover">
+<title>Sárkány-paripán vágtattam</title>
+<style>
+/* Layout: full-width stage with one control row beneath it. */
+:root {
+  --bg: #f6efe6;
+  --fg: #2a1d33;
+  --muted: #6b5a72;
+  --accent: #d9532b;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #1a1424; --fg: #f3e9f5; --muted: #a897b2; --accent: #ff8a5c; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #1a1424; --fg: #f3e9f5; --muted: #a897b2; --accent: #ff8a5c; color-scheme: dark;
+}
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font: 14px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 16px;
+  box-sizing: border-box;
+}
+main { max-width: 960px; margin: 0 auto; display: grid; gap: 12px; }
+h1 { font-size: 20px; margin: 0; text-wrap: balance; }
+.stage {
+  width: 100%; max-width: 100%; aspect-ratio: 16 / 9; display: block;
+  border-radius: 12px; background: #000;
+}
+.controls { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+button {
+  font: inherit; color: var(--bg); background: var(--accent);
+  border: 0; border-radius: 999px; padding: 8px 18px; cursor: pointer;
+}
+button:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; }
+.meta { color: var(--muted); font-variant-numeric: tabular-nums; }
+input[type="range"] { flex: 1; min-width: 0; accent-color: var(--accent); }
+</style>
+
+<main>
+  <h1>Sárkány-paripán vágtattam</h1>
+  <canvas id="stage" class="stage" width="1920" height="1080" aria-label="Animált jelenet: lovas sárkány-paripa a felhők felett"></canvas>
+  <div class="controls">
+    <button id="toggle" type="button">Lejátszás</button>
+    <input id="seek" type="range" min="0" max="10" step="0.01" value="0" aria-label="Idő">
+    <span id="time" class="meta">0.0 / 10 mp</span>
+  </div>
+  <p class="meta">10 másodperces, ismétlődő demó, 90 BPM ritmusra igazított mozgással.</p>
+</main>
+
+<script>
+(() => {
+  const canvas = document.getElementById('stage');
+  const ctx = canvas.getContext('2d');
+  const btn = document.getElementById('toggle');
+  const seek = document.getElementById('seek');
+  const timeEl = document.getElementById('time');
+  const LOOP = 10, BEAT = 60 / 90;
+  const W = canvas.width, H = canvas.height;
+  const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  let t = 0, playing = !reduce, last = performance.now();
+
+  // Seeded random so the scene is the same on every load.
+  let seed = 7;
+  const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+
+  const clouds = Array.from({ length: 70 }, () => ({
+    x: rnd() * 2 * W, y: 700 + rnd() * 300, r: 110 + rnd() * 190, a: 0.55 + rnd() * 0.4,
+  }));
+  const sparkles = Array.from({ length: 70 }, () => ({
+    x: rnd() * W, y: rnd() * H, s: 1 + rnd() * 2.6, p: rnd() * 6.28, v: 12 + rnd() * 30,
+  }));
+  const stars = Array.from({ length: 120 }, () => ({ x: rnd() * W, y: rnd() * 560, s: 0.6 + rnd() * 1.6, p: rnd() * 6.28 }));
+
+  function skyAt(t) {
+    // sunrise over the 10 s loop: deep blue -> warm dawn
+    const k = Math.min(1, t / LOOP);
+    const g = ctx.createLinearGradient(0, 0, 0, H);
+    g.addColorStop(0, mix('#3a6fd0', '#7fb4f0', k));
+    g.addColorStop(0.45, mix('#8fa8e0', '#ffd0a0', k));
+    g.addColorStop(0.75, mix('#f3a8a0', '#ffe2b8', k));
+    g.addColorStop(1, '#ffd9b0');
+    ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+  }
+  function mix(a, b, k) {
+    const pa = [1, 3, 5].map(i => parseInt(a.substr(i, 2), 16));
+    const pb = [1, 3, 5].map(i => parseInt(b.substr(i, 2), 16));
+    return 'rgb(' + pa.map((v, i) => Math.round(v + (pb[i] - v) * k)).join(',') + ')';
+  }
+
+  function sun(t) {
+    const k = Math.min(1, t / LOOP);
+    const sx = W / 2, sy = 780 - 300 * k;
+    // halo
+    const h = ctx.createRadialGradient(sx, sy, 80, sx, sy, 620);
+    h.addColorStop(0, 'rgba(255,238,190,0.85)'); h.addColorStop(1, 'rgba(255,238,190,0)');
+    ctx.fillStyle = h; ctx.fillRect(0, 0, W, H);
+    // light rays
+    ctx.save(); ctx.translate(sx, sy); ctx.rotate(t * 0.03);
+    for (let i = 0; i < 14; i++) {
+      ctx.rotate(Math.PI * 2 / 14);
+      ctx.fillStyle = 'rgba(255,245,210,0.07)';
+      ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(-40, 1400); ctx.lineTo(40, 1400); ctx.fill();
+    }
+    ctx.restore();
+    // disc
+    const d = ctx.createRadialGradient(sx - 30, sy - 30, 20, sx, sy, 190);
+    d.addColorStop(0, '#fffbe6'); d.addColorStop(0.7, '#ffe29a'); d.addColorStop(1, '#ffc86b');
+    ctx.fillStyle = d; ctx.beginPath(); ctx.arc(sx, sy, 190, 0, Math.PI * 2); ctx.fill();
+  }
+
+  function stars_(t) {
+    const k = Math.min(1, t / LOOP);
+    const a = Math.max(0, 1 - k * 1.4);
+    if (a <= 0) return;
+    for (const s of stars) {
+      ctx.fillStyle = 'rgba(255,250,230,' + (a * (0.4 + 0.6 * Math.sin(t * 2 + s.p))).toFixed(3) + ')';
+      ctx.beginPath(); ctx.arc(s.x, s.y, s.s, 0, Math.PI * 2); ctx.fill();
+    }
+  }
+
+  function mountains(offset, baseY, amp, color, freq, phase) {
+    const g = ctx.createLinearGradient(0, baseY - amp, 0, H);
+    g.addColorStop(0, color[0]); g.addColorStop(1, color[1]);
+    ctx.fillStyle = g; ctx.beginPath(); ctx.moveTo(0, H);
+    for (let x = 0; x <= W + 120; x += 24) {
+      const y = baseY - amp * (0.55 + 0.45 * Math.sin((x + offset) * freq + phase)) * (0.7 + 0.3 * Math.sin((x + offset) * freq * 2.7 + phase));
+      ctx.lineTo(x, y);
+    }
+    ctx.lineTo(W, H); ctx.closePath(); ctx.fill();
+  }
+
+  function cloudPuff(x, y, r, a) {
+    const g = ctx.createRadialGradient(x, y - r * 0.1, r * 0.1, x, y, r);
+    g.addColorStop(0, 'rgba(255,250,252,' + a + ')');
+    g.addColorStop(0.7, 'rgba(255,236,246,' + (a * 0.7) + ')');
+    g.addColorStop(1, 'rgba(255,230,242,0)');
+    ctx.fillStyle = g; ctx.beginPath(); ctx.ellipse(x, y, r, r * 0.3, 0, 0, Math.PI * 2); ctx.fill();
+  }
+
+  function cloudSea(t) {
+    for (const c of clouds) {
+      const x = ((c.x - 170 * t) % (2 * W) + 2 * W) % (2 * W) - W / 2;
+      cloudPuff(x, c.y, c.r, c.a);
+    }
+    const shade = ctx.createLinearGradient(0, 960, 0, H);
+    shade.addColorStop(0, 'rgba(120,90,150,0)'); shade.addColorStop(1, 'rgba(96,72,128,0.9)');
+    ctx.fillStyle = shade; ctx.fillRect(0, 960, W, H - 960);
+  }
+
+  function background(t) {
+    skyAt(t); stars_(t); sun(t);
+    mountains(45 * t, 700, 300, ['#6a4a86', '#3f2d5c'], 0.0035, 1.3);
+    mountains(110 * t, 800, 220, ['#4a3470', '#2c1f4a'], 0.0052, 4.1);
+    cloudSea(t);
+  }
+
+  function sparkle(x, y, s, a) {
+    ctx.fillStyle = 'rgba(255,240,190,' + a + ')';
+    ctx.beginPath();
+    ctx.moveTo(x, y - s * 2.4); ctx.quadraticCurveTo(x, y, x + s * 2.4, y);
+    ctx.quadraticCurveTo(x, y, x, y + s * 2.4); ctx.quadraticCurveTo(x, y, x - s * 2.4, y);
+    ctx.quadraticCurveTo(x, y, x, y - s * 2.4); ctx.fill();
+  }
+
+  function particles(t) {
+    for (const p of sparkles) {
+      const y = ((p.y - p.v * t) % H + H) % H;
+      const a = 0.35 + 0.65 * (0.5 + 0.5 * Math.sin(t * 3 + p.p));
+      sparkle(p.x + 14 * Math.sin(t + p.p), y, p.s, a.toFixed(3));
+    }
+  }
+
+  // Dragon-horse with rider. Local design coords 0..700 x 0..520.
+  function dragonHorse(ox, oy, ph, wf, tt) {
+    ctx.save(); ctx.translate(ox, oy);
+    const lift = Math.sin(wf);
+    ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+
+    // tail (gradient, flowing)
+    const tg = ctx.createLinearGradient(20, 250, 130, 300);
+    tg.addColorStop(0, '#ffa04a'); tg.addColorStop(1, '#b8421f');
+    ctx.fillStyle = tg; ctx.beginPath();
+    ctx.moveTo(130, 250);
+    ctx.bezierCurveTo(90, 210 + 10 * Math.sin(tt * 3), 40, 230 + 14 * Math.sin(tt * 2.3), 20, 300 + 12 * Math.sin(tt * 2.3));
+    ctx.bezierCurveTo(60, 285, 100, 292, 128, 290); ctx.fill();
+
+    // wings: gradient membrane with bone lines
+    const wg = ctx.createLinearGradient(260, 60, 420, 230);
+    wg.addColorStop(0, '#ffd08a'); wg.addColorStop(0.5, '#ff8a3d'); wg.addColorStop(1, '#d4502a');
+    ctx.fillStyle = wg;
+    const wingPath = () => {
+      ctx.beginPath(); ctx.moveTo(330, 210);
+      ctx.quadraticCurveTo(250 + 30 * lift, 110 - 60 * lift, 260 + 40 * lift, 60 - 70 * lift);
+      ctx.lineTo(320 + 20 * lift, 120 - 40 * lift); ctx.lineTo(380, 150); ctx.lineTo(420, 230); ctx.closePath();
+    };
+    wingPath(); ctx.fill();
+    ctx.strokeStyle = 'rgba(120,30,10,0.55)'; ctx.lineWidth = 4;
+    [[330,210,320+20*lift,120-40*lift],[330,210,260+40*lift,60-70*lift],[330,210,380,150]].forEach(([x0,y0,x1,y1]) => {
+      ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke();
+    });
+
+    // legs with gallop phase
+    [[230,370,0],[275,378,1.57],[410,378,3.14],[455,370,4.71]].forEach(([hx,hy,o]) => {
+      const fx = hx + 35 * Math.sin(ph + o), fy = 468 - 12 * Math.max(0, Math.cos(ph + o));
+      const lg = ctx.createLinearGradient(hx, hy, fx, fy);
+      lg.addColorStop(0, '#e46a3e'); lg.addColorStop(1, '#a8402a');
+      ctx.strokeStyle = lg; ctx.lineWidth = 24;
+      ctx.beginPath(); ctx.moveTo(hx, hy); ctx.lineTo(fx, fy); ctx.stroke();
+      ctx.fillStyle = '#2e1716';
+      ctx.beginPath(); ctx.ellipse(fx, fy + 8, 15, 9, 0, 0, Math.PI * 2); ctx.fill();
+    });
+
+    // body with shading
+    const bg = ctx.createRadialGradient(300, 250, 40, 350, 300, 190);
+    bg.addColorStop(0, '#ff9a5a'); bg.addColorStop(0.6, '#e35d36'); bg.addColorStop(1, '#a8402a');
+    ctx.fillStyle = bg;
+    ctx.beginPath(); ctx.ellipse(350, 300, 170, 95, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = '#3a1410'; ctx.lineWidth = 6; ctx.stroke();
+    // belly light
+    ctx.fillStyle = 'rgba(255,200,120,0.35)';
+    ctx.beginPath(); ctx.ellipse(350, 335, 130, 38, 0, 0, Math.PI * 2); ctx.fill();
+    // scales
+    ctx.strokeStyle = 'rgba(255,220,140,0.45)'; ctx.lineWidth = 3;
+    for (let r = 0; r < 4; r++) for (let c = 0; c < 6; c++) {
+      const x = 250 + c * 40 + (r % 2) * 20, y = 240 + r * 28;
+      ctx.beginPath(); ctx.arc(x, y, 12, 0.2 * Math.PI, 0.8 * Math.PI); ctx.stroke();
+    }
+
+    // neck and head
+    const ng = ctx.createLinearGradient(440, 120, 590, 260);
+    ng.addColorStop(0, '#f07a46'); ng.addColorStop(1, '#c84628');
+    ctx.fillStyle = ng;
+    ctx.beginPath(); ctx.moveTo(440, 260); ctx.quadraticCurveTo(470, 170, 540, 110);
+    ctx.lineTo(590, 120); ctx.quadraticCurveTo(540, 200, 520, 250); ctx.closePath(); ctx.fill();
+    const hg = ctx.createRadialGradient(560, 110, 20, 590, 150, 70);
+    hg.addColorStop(0, '#ff9a5a'); hg.addColorStop(1, '#c84628');
+    ctx.fillStyle = hg;
+    ctx.beginPath(); ctx.ellipse(575, 140, 58, 40, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(620, 160, 40, 25, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#c84628'; ctx.beginPath(); ctx.moveTo(545, 105); ctx.lineTo(555, 62); ctx.lineTo(575, 108); ctx.fill();
+    // eye with highlight
+    ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(585, 128, 9, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#2a1a28'; ctx.beginPath(); ctx.arc(587, 129, 5, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(589, 127, 1.8, 0, Math.PI * 2); ctx.fill();
+
+    // mane: flowing golden strands
+    for (let i = 0; i < 14; i++) {
+      const mg = ctx.createRadialGradient(0, 0, 0, 0, 0, 1);
+      const x = 545 - i * 9 + 5 * Math.sin(tt * 4 + i * 0.6), y = 100 + i * 12.5;
+      ctx.fillStyle = i < 5 ? '#ffd45a' : '#ffb03c';
+      ctx.beginPath(); ctx.arc(x, y, 21 - i * 0.9, 0, Math.PI * 2); ctx.fill();
+    }
+
+    // rider with cape
+    const cg = ctx.createLinearGradient(240, 150, 335, 205);
+    cg.addColorStop(0, '#6d1530'); cg.addColorStop(1, '#b8325a');
+    ctx.fillStyle = cg;
+    ctx.beginPath(); ctx.moveTo(330, 150);
+    ctx.quadraticCurveTo(290, 150 + 6 * Math.sin(tt * 6), 270 + 12 * Math.sin(tt * 6), 160);
+    ctx.quadraticCurveTo(240 + 18 * Math.sin(tt * 6 + 1), 190 + 10 * Math.sin(tt * 5), 240 + 18 * Math.sin(tt * 6 + 1), 200);
+    ctx.lineTo(335, 205); ctx.closePath(); ctx.fill();
+    const tunic = ctx.createLinearGradient(330, 150, 370, 220);
+    tunic.addColorStop(0, '#5a86cc'); tunic.addColorStop(1, '#2f4c8a');
+    ctx.fillStyle = tunic; ctx.beginPath(); ctx.ellipse(350, 185, 26, 36, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = '#2f4c8a'; ctx.lineWidth = 14;
+    ctx.beginPath(); ctx.moveTo(345, 160); ctx.lineTo(420, 190); ctx.stroke();
+    ctx.fillStyle = '#f2cca4'; ctx.beginPath(); ctx.ellipse(356, 128, 22, 24, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#6e4628'; ctx.beginPath(); ctx.ellipse(356, 112, 24, 14, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.restore();
+  }
+
+  // Crystal bird: gently orbits above the sky.
+  function crystalBird(t) {
+    const cx = W * 0.2 + 120 * Math.sin(t * 0.8), cy = 260 + 40 * Math.sin(t * 1.6);
+    const l = Math.sin(t * 2 * Math.PI / BEAT * 0.5 + 0.5);
+    ctx.save(); ctx.translate(cx, cy); ctx.scale(0.7, 0.7);
+    const wg = ctx.createLinearGradient(-40, -40, 80, 40);
+    wg.addColorStop(0, '#fffefe'); wg.addColorStop(0.5, '#8ff0ff'); wg.addColorStop(1, '#41b8d8');
+    ctx.fillStyle = wg;
+    ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(-70, -60 - 40 * l); ctx.lineTo(-30, 0); ctx.closePath(); ctx.fill();
+    ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(70, -60 - 40 * l); ctx.lineTo(30, 0); ctx.closePath(); ctx.fill();
+    const bg = ctx.createRadialGradient(-10, -10, 4, 0, 0, 60);
+    bg.addColorStop(0, '#e8ffff'); bg.addColorStop(0.6, '#5fd3e8'); bg.addColorStop(1, '#2b93b8');
+    ctx.fillStyle = bg; ctx.beginPath(); ctx.ellipse(0, 0, 58, 38, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = '#0f3a4a'; ctx.lineWidth = 5; ctx.stroke();
+    ctx.fillStyle = '#5fd3e8'; ctx.beginPath(); ctx.arc(45, -25, 26, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#ffc85a'; ctx.beginPath(); ctx.moveTo(66, -30); ctx.lineTo(90, -22); ctx.lineTo(66, -16); ctx.fill();
+    ctx.fillStyle = '#1e2a3a'; ctx.beginPath(); ctx.arc(52, -28, 4, 0, Math.PI * 2); ctx.fill();
+    ctx.restore();
+  }
+
+  function frame(t) {
+    background(t);
+    const bob = 25 * Math.abs(Math.sin(Math.PI * t / BEAT));
+    crystalBird(t);
+    particles(t);
+    dragonHorse(520, 240 - bob, Math.PI * t / BEAT, 2 * Math.PI * t / BEAT * 0.5, t);
+  }
+
+  function render() {
+    frame(t);
+    timeEl.textContent = t.toFixed(1) + ' / ' + LOOP + ' mp';
+    seek.value = t;
+  }
+
+  function tick(now) {
+    const dt = (now - last) / 1000; last = now;
+    if (playing) t = (t + dt) % LOOP;
+    render();
+    requestAnimationFrame(tick);
+  }
+
+  btn.addEventListener('click', () => {
+    playing = !playing;
+    btn.textContent = playing ? 'Szünet' : 'Lejátszás';
+  });
+  seek.addEventListener('input', () => { t = parseFloat(seek.value); render(); });
+  btn.textContent = playing ? 'Szünet' : 'Lejátszás';
+  render();
+  requestAnimationFrame(tick);
+})();
+</script>
+
+</body></html>
